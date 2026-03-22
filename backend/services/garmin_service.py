@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime, timedelta, date
+from pathlib import Path
 from typing import Optional
 
 from garminconnect import Garmin, GarminConnectConnectionError, GarminConnectAuthenticationError
@@ -8,14 +9,31 @@ from sqlmodel import Session, select
 
 from db.database import Activity, SleepRecord
 
+# Garth token store — saved after first login so MFA is only needed once
+TOKEN_STORE = Path(__file__).parent.parent / ".garth_tokens"
+
 
 def _get_client() -> Garmin:
     email = os.getenv("GARMIN_EMAIL")
     password = os.getenv("GARMIN_PASSWORD")
     if not email or not password:
         raise ValueError("GARMIN_EMAIL and GARMIN_PASSWORD must be set in .env")
+
     client = Garmin(email, password)
+
+    if TOKEN_STORE.exists():
+        # Reuse saved session — no MFA prompt needed
+        try:
+            client.login(str(TOKEN_STORE))
+            return client
+        except Exception:
+            # Tokens expired; fall through to full login
+            pass
+
+    # First-time or re-login: will raise GarminConnectAuthenticationError
+    # if MFA is needed and no prompt_mfa is provided — use garmin_login.py instead
     client.login()
+    client.garth.dump(str(TOKEN_STORE))
     return client
 
 
